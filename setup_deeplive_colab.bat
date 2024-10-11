@@ -100,7 +100,7 @@ if "%choice%"=="1" (
     echo Installing DirectML dependencies...
     pip uninstall -y onnxruntime onnxruntime-directml
     pip install onnxruntime-directml==1.15.1
-    set exec_provider="directml"
+    set exec_provider="dml"
 ) else if "%choice%"=="5" (
     echo Installing OpenVINO dependencies...
     pip uninstall -y onnxruntime onnxruntime-openvino
