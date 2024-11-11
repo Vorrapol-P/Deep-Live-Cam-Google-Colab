@@ -131,17 +131,22 @@ def send_streams(cap: VideoCapture) -> subprocess.Popen[bytes]:
     
     ffmpeg_command = [
         'ffmpeg',
+        '-fflags', 'nobuffer',
         '-f', 'rawvideo',
         '-pix_fmt', 'bgr24',
         '-s',  f"{int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}",
-        '-r',  str(int(cap.get(cv2.CAP_PROP_FPS))),
+        '-r',  '30',#str(int(cap.get(cv2.CAP_PROP_FPS))),
         '-i', '-',
         '-c:v', 'libx264',
         '-preset', 'ultrafast',
         '-tune', 'zerolatency',
-        '-fflags', 'nobuffer',
-        '-flags', 'low_delay',
-        '-rtbufsize', '100M',
+        
+        #'-flags', 'low_delay',
+        #'-rtbufsize', '100M',
+        '-g', '15',  # GOP size set to 1 to make each frame a keyframe
+        '-b:v', '500k',  # Set bitrate to 1 Mbps
+        '-maxrate', '500k',  
+        '-bufsize', '500k',
         '-f', 'mpegts', modules.globals.push_addr_two #'tcp://127.0.0.1:5552'
     ]
 
@@ -161,12 +166,12 @@ def recieve_streams(cap: VideoCapture)->subprocess.Popen[bytes]:
     ffmpeg_process_com = subprocess.Popen(ffmpeg_command_recie, stdout=subprocess.PIPE)
     return ffmpeg_process_com
 
-def write_to_stdin(queue: queue.Queue, stream_out: subprocess.Popen):
+def write_to_stdin(temp_frame: Frame,queue: queue.Queue, stream_out: subprocess.Popen):
    
-    temp_frame = queue.get()
+    #temp_frame = queue.get()
     temp_frame_bytes = temp_frame.tobytes()
     stream_out.stdin.write(temp_frame_bytes)
-def read_from_stdout(queue: queue.Queue, stream_in: subprocess.Popen, output_queue: queue.Queue):
+def read_from_stdout(stream_in: subprocess.Popen, output_queue: queue.Queue):
     
     raw_frame = stream_in.stdout.read(960 * 540 * 3)
     
@@ -180,16 +185,17 @@ def swap_face_remote(temp_frame: Frame,stream_out:subprocess.Popen[bytes],stream
     # Start threads for stdin and stdout
     write_thread = threading.Thread(target=write_to_stdin, args=(input_queue, stream_out))
     read_thread = threading.Thread(target=read_from_stdout, args=(input_queue, stream_in, output_queue))
-    
-    write_thread.start()
+
     read_thread.start()
+    write_thread.start()
+    
     
     # Send the frame to the stdin thread
     input_queue.put(temp_frame)
-    
+    #processed_frame = []
     # Wait for the processed frame from the stdout thread
     processed_frame = output_queue.get()
-    
+
     # Stop the threads
     input_queue.put(None)
     write_thread.join()

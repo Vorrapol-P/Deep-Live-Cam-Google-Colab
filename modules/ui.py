@@ -6,14 +6,16 @@ import tkinter as tk
 from typing import Callable, Tuple
 import cv2
 from PIL import Image, ImageOps
-
+from typing import Any, List, Callable
+from types import ModuleType
 import modules.globals
 import modules.metadata
 from modules.face_analyser import get_one_face
 from modules.capturer import get_video_frame, get_video_frame_total
 from modules.processors.frame.core import get_frame_processors_modules
 from modules.utilities import is_image, is_video, resolve_relative_path
-
+import queue
+import threading
 ROOT = None
 ROOT_HEIGHT = 700
 ROOT_WIDTH = 800
@@ -33,7 +35,7 @@ target_label = None
 status_label = None
 
 img_ft, vid_ft = modules.globals.file_types
-
+frames_array =[]
 
 def init(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.CTk:
     global ROOT, PREVIEW
@@ -297,6 +299,27 @@ def update_preview(frame_number: int = 0) -> None:
         image = ctk.CTkImage(image, size=image.size)
         preview_label.configure(image=image)
 
+def send_streams(cap:cv2.VideoCapture,input_queue:queue.Queue,remote_modules:List[ModuleType],stream_out:Any):
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            temp_frame = frame.copy() 
+            input_queue.put(temp_frame)
+            remote_modules[1].write_to_stdin(temp_frame,input_queue,stream_out)
+    finally:
+        cap.release()
+        stream_out.terminate()
+def receive_frames(output_queue:queue.Queue,remote_modules:List[ModuleType],stream_in:Any):
+    try:
+        while True:
+            remote_modules[1].read_from_stdout(stream_in,output_queue)
+            while not output_queue.empty():
+                item = output_queue.get()
+                frames_array.append(item)
+    finally:
+        stream_in.terminate()   
 def webcam_preview():
     if modules.globals.source_path is None:
         # No image selected
@@ -324,6 +347,7 @@ def webcam_preview():
     stream_in = None
 
     if 'remote_processor' in modules.globals.frame_processors :
+        print(f"{int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}")
         remote_modules = get_frame_processors_modules(['remote_processor'])
         source_data = cv2.imread(modules.globals.source_path)
         remote_modules[1].send_source_frame(source_data)
@@ -331,51 +355,49 @@ def webcam_preview():
         stream_out = remote_modules[1].send_streams(cap)
         #start ffmpeg stream In subprocess
         stream_in = remote_modules[1].recieve_streams(cap)
-        
         remote_process = True
-    try:
+        input_queue = queue.Queue()
+        output_queue = queue.Queue()
+        
+        thread_stream = threading.Thread(target=send_streams,args=(cap,input_queue,remote_modules,stream_out,))
+        thread_stream.start()
+
+        thread_stream_in = threading.Thread(target=receive_frames,args=(output_queue,remote_modules,stream_in,))
+        thread_stream_in.start()
+        global frames_array
         while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+            if len(frames_array) > 0:
+                frame = frames_array[-1]  # Display the latest frame
+                cv2.imshow("Processed Stream", frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
 
-            # Select and save face image only once
-            if source_image is None and modules.globals.source_path:
-                source_image = get_one_face(cv2.imread(modules.globals.source_path))
+    else:
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
 
-            temp_frame = frame.copy()  #Create a copy of the frame
+                # Select and save face image only once
+                if source_image is None and modules.globals.source_path:
+                    source_image = get_one_face(cv2.imread(modules.globals.source_path))
 
-            for frame_processor in frame_processors:
-                if remote_process:
-                    if frame_processor.__name__ =="modules.processors.frame.remote_processor":
-                        #print('------- Remote Process ----------')
-                        if not frame_processor.pre_check():
-                            print("No Input and Output Address")
-                            sys.exit()
-                        _frame = frame_processor.stream_frame(temp_frame,stream_out,stream_in)
-                        if _frame is not None:
-                            temp_frame = _frame
-                        
+                temp_frame = frame.copy()  #Create a copy of the frame
 
-                if not remote_process:
-                    temp_frame = frame_processor.process_frame(source_image, temp_frame)
-            if not remote_process:
-                image = cv2.cvtColor(temp_frame, cv2.COLOR_BGR2RGB)  # Convert the image to RGB format to display it with Tkinter
-                image = Image.fromarray(image)
-                image = ImageOps.contain(image, (PREVIEW_MAX_WIDTH, PREVIEW_MAX_HEIGHT), Image.LANCZOS)
-                image = ctk.CTkImage(image, size=image.size)
-                preview_label.configure(image=image)
-                ROOT.update()
-            elif _frame is not None:
-                image = cv2.cvtColor(temp_frame, cv2.COLOR_BGR2RGB)  # Convert the image to RGB format to display it with Tkinter
-                image = Image.fromarray(image)
-                image = ImageOps.contain(image, (PREVIEW_MAX_WIDTH, PREVIEW_MAX_HEIGHT), Image.LANCZOS)
-                image = ctk.CTkImage(image, size=image.size)
-                preview_label.configure(image=image)
-                ROOT.update()
+                for frame_processor in frame_processors:
+                    if not remote_process:
+                        temp_frame = frame_processor.process_frame(source_image, temp_frame)
                 
-            if PREVIEW.state() == 'withdrawn':
-                break
-    finally:
-        cap.release()
-        PREVIEW.withdraw()  # Close preview window when loop is finished
+                image = cv2.cvtColor(temp_frame, cv2.COLOR_BGR2RGB)  # Convert the image to RGB format to display it with Tkinter
+                image = Image.fromarray(image)
+                image = ImageOps.contain(image, (PREVIEW_MAX_WIDTH, PREVIEW_MAX_HEIGHT), Image.LANCZOS)
+                image = ctk.CTkImage(image, size=image.size)
+                preview_label.configure(image=image)
+                ROOT.update()
+                  
+                if PREVIEW.state() == 'withdrawn':
+                    break
+        finally:
+            cap.release()
+            PREVIEW.withdraw()  # Close preview window when loop is finished
