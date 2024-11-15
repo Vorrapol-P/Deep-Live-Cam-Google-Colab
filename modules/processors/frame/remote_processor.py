@@ -144,9 +144,9 @@ def send_streams(cap: VideoCapture) -> subprocess.Popen[bytes]:
         #'-flags', 'low_delay',
         #'-rtbufsize', '100M',
         '-g', '15',  # GOP size set to 1 to make each frame a keyframe
-        '-b:v', '500k',  # Set bitrate to 1 Mbps
-        '-maxrate', '500k',  
-        '-bufsize', '500k',
+        '-b:v', '800k',  # Set bitrate to 1 Mbps
+        '-maxrate', '800k',  
+        '-bufsize', '800k',
         '-f', 'mpegts', modules.globals.push_addr_two #'tcp://127.0.0.1:5552'
     ]
 
