@@ -16,6 +16,7 @@ from modules.processors.frame.core import get_frame_processors_modules
 from modules.utilities import is_image, is_video, resolve_relative_path
 import queue
 import threading
+import time
 ROOT = None
 ROOT_HEIGHT = 700
 ROOT_WIDTH = 800
@@ -306,7 +307,7 @@ def send_streams(cap:cv2.VideoCapture,input_queue:queue.Queue,remote_modules:Lis
             if not ret:
                 break
             temp_frame = frame.copy() 
-            input_queue.put(temp_frame)
+            #input_queue.put(temp_frame)
             remote_modules[1].write_to_stdin(temp_frame,input_queue,stream_out)
     finally:
         cap.release()
@@ -371,6 +372,9 @@ def webcam_preview():
                 cv2.imshow("Processed Stream", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
+                
+                if len(frames_array) > 1:
+                    frames_array.pop(0)
 
     else:
         try:
